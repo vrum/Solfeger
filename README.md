@@ -1,5 +1,7 @@
 # Solfeger Sequencer Release
 
+**Live Demo:** [https://vrum.github.io/Solfeger/](https://vrum.github.io/Solfeger/)
+
 Solfeger is a web-based music sequencer and ear-training tool.
 
 ## How to use
