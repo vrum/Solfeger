@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solfeger Sequencer</title>
+    <meta name="description"
+        content="A professional web-based music sequencer and composition tool powered by Tone.js and p5.js.">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.37/Tone.js"></script>
+    <script src="https://unpkg.com/@tonejs/midi"></script>
+    <script src="https://unpkg.com/soundfont-player@0.12.0/dist/soundfont-player.min.js"></script>
+    <link rel="stylesheet" href="src/style.css">
+    </head>
+<body>
+    <div id="header-bar">
+        <button id="sidebar-toggle" class="collapse-toggle-btn" title="Toggle Sidebar">☰</button>
+        <div class="app-title">Solfeger</div>
+        <button id="toolbar-toggle" class="collapse-toggle-btn" title="Toggle Toolbar">☰</button>
+    </div>
+
+    <div id="toolbar">
+        <!-- Project Section -->
+        <div class="toolbar-section sec-project" title="Project Management: New, Save, Load, and Presets">
+            <div class="section-body">
+                <div class="btn-group">
+                    <button id="new-project-btn" onclick="newProject()" title="New Project (Factory Reset)">📄</button>
+                    <button id="save-preset-btn" onclick="saveAsPreset()" title="Save Current as Local Preset">💾</button>
+                    <button onclick="exportJSON()" title="Export Project to JSON">📤</button>
+                    <button onclick="exportMIDI()" title="Export as MIDI">🎹</button>
+                    <button id="import-json-btn" onclick="document.getElementById('import-input').click()"
+                        title="Import Project from JSON">📂</button>
+                    <button id="import-hookpad-btn" onclick="document.getElementById('import-hookpad-input').click()"
+                        title="Import from Hookpad JSON">H</button>
+                    <input type="file" id="import-input" style="display:none" onchange="importJSON(event)">
+                    <input type="file" id="import-hookpad-input" style="display:none" onchange="importHookpad(event)">
+                </div>
+                <div class="control-group">
+                    <select id="preset-select" onchange="loadPreset(this.value); this.selectedIndex=0" style="width:100px"
+                        title="Load Song Preset (f to focus)">
+                        <option disabled selected>Presets</option>
+                    </select>
+                    <button onclick="toggleArchiveManager('preset')" title="Manage/Restore Archived Presets">📁</button>
+                </div>
+                <select id="progression-select" style="width:100px" title="Select Chord Progression">
+                    <option disabled selected value="">Chords</option>
+                    <option value="axis">Four Chords</option>
+                    <option value="doo-wop">Doo-Wop</option>
+                    <option value="sensitive">Sensitive</option>
+                    <option value="andalusian">Andalusian</option>
+                </select>
+                <button onclick="addSelectedChordProgression()" title="Add Selected Chord Progression">Add</button>
+            </div>
+        </div>
+
+        <!-- Transport Section -->
+        <div class="toolbar-section sec-transport" title="Playback Controls: Play, Record, Tempo, and Volume">
+            <div class="section-body">
+                <button id="play-btn" title="Play/Pause (Space)">▶ Play</button>
+                <button id="rec-btn" title="Record Output (Shift + R)">⏺ Record</button>
+                <div class="control-group">
+                    <label>BPM</label>
+                    <input type="number" id="bpm-input" min="1" max="999" value="120" style="width:50px" onchange="updateBPM(this.value)" title="Set Tempo">
+                    <input type="range" id="bpm-slider" min="60" max="200" value="120" style="width:60px"
+                        oninput="updateBPM(this.value)" title="Adjust Tempo">
+                    <select onchange="updateBPM(this.value); this.selectedIndex=0" style="width:40px"
+                        title="BPM Presets">
+                        <option disabled selected>Set</option>
+                        <option value="80">80</option>
+                        <option value="100">100</option>
+                        <option value="120">120</option>
+                        <option value="140">140</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label>Swing</label>
+                    <input type="range" id="swing-slider" min="0" max="1" step="0.05" value="0" style="width:50px"
+                        oninput="setSwing(this.value)" title="Swing Amount">
+                </div>
+                <div class="control-group">
+                    <label>Vol</label>
+                    <input type="range" id="volume-slider" min="-30" max="0" value="-5" style="width:50px"
+                        oninput="setMasterVolume(this.value)" title="Master Volume (dB)">
+                    <label>Space</label>
+                    <input type="range" id="reverb-slider" min="0" max="1" step="0.05" value="0" style="width:50px"
+                        oninput="setReverbWet(this.value)" title="Reverb Amount">
+                </div>
+            </div>
+        </div>
+
+        <!-- Edit Section -->
+        <div class="toolbar-section sec-edit" title="Editing Tools: Undo/Redo, Copy/Paste, and Selection">
+            <div class="section-body">
+                <div class="btn-group">
+                    <button onclick="undo()" title="Undo (Ctrl+Z)">↶</button>
+                    <button onclick="redo()" title="Redo (Ctrl+Y)">↷</button>
+                </div>
+                <div class="btn-group">
+                    <button id="select-btn" onclick="toggleSelectionMode()"
+                        title="Toggle Selection Mode (s)">Select</button>
+                    <button onclick="copySelection()" title="Copy Selection (Ctrl+C)">Copy</button>
+                    <button onclick="cutSelection()" title="Cut Selection (Ctrl+X)">Cut</button>
+                    <button onclick="pasteSelection()" title="Paste Selection (Ctrl+V)">Paste</button>
+                    <button onclick="deleteSelection()" title="Delete Selection (Del)">Del</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scale & Input Section -->
+        <div class="toolbar-section sec-scale" title="Musical Settings: Key, Scale, Note Duration, and Input Mode">
+            <div class="section-body">
+                <div class="control-group">
+                    <select id="root-select" onchange="changeRoot(this.value)" title="Root Key (Up/Down)">
+                        <option value="C">C</option>
+                        <option value="C#">C#</option>
+                        <option value="D">D</option>
+                        <option value="Eb">Eb</option>
+                        <option value="E">E</option>
+                        <option value="F">F</option>
+                        <option value="F#">F#</option>
+                        <option value="G">G</option>
+                        <option value="Ab">Ab</option>
+                        <option value="A">A</option>
+                        <option value="Bb">Bb</option>
+                        <option value="B">B</option>
+                    </select>
+                    <select id="scale-select" onchange="updateScale()" title="Scale Type (Shift + Up/Down)">
+                        <option value="major">Major</option>
+                        <option value="minor">Minor</option>
+                        <option value="harmonicMinor">Harmonic Minor</option>
+                        <option value="melodicMinor">Melodic Minor</option>
+                        <option value="majorPentatonic">Pentatonic</option>
+                        <option value="chromatic">Chromatic</option>
+                    </select>
+                    <button onclick="transpose(-1)" title="Transpose Down">-</button>
+                    <button onclick="transpose(1)" title="Transpose Up">+</button>
+                </div>
+                <div class="control-group">
+                    <select id="duration-select" onchange="setDuration(this.value)" style="width:70px"
+                        title="Default Note Length (1-5)">
+                        <option value="1">16th</option>
+                        <option value="2">8th</option>
+                        <option value="4">1/4</option>
+                        <option value="8">1/2</option>
+                        <option value="16">Whole</option>
+                    </select>
+                    <select id="rhythm-select" onchange="setRhythm(this.value)" style="width:75px" title="Rhythm Pattern (Shift + Q/W/E/T)">
+                        <option value="note">Note</option>
+                        <option value="triplet">Triplet</option>
+                        <option value="anapest">Anapest</option>
+                        <option value="dactyl">Dactyl</option>
+                    </select>
+                </div>
+                <div class="btn-group">
+                    <button id="accidental-btn" onclick="toggleAccidentalMode()"
+                        title="Toggle Accidental Mode (Alt + A)">#/b</button>
+                    <button id="convert-btn" onclick="toggleConvertMode()"
+                        title="Convert 3 notes to rhythm (Alt + C)">Conv</button>
+                </div>
+                <div class="vertical-controls">
+                    <label title="Place Triads"><input type="checkbox" id="chord-toggle"> Chord</label>
+                    <label title="Randomize Pitches for Patterns" style="display:none"><input type="checkbox" id="random-toggle">
+                        Rand</label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Grid Section -->
+        <div class="toolbar-section sec-grid" title="Grid Operations: Clear, Randomize, Shift, and Rows">
+            <div class="section-body">
+                <div class="btn-group">
+                    <button onclick="resetGrid()" title="Clear Grid">Clear</button>
+                    <button onclick="randomizeGrid()" title="Randomize Notes">🎲</button>
+                    <button onclick="reverseGrid()" title="Reverse Pattern">Rev</button>
+                    <button onclick="flipGrid()" title="Flip Vertically">Flip</button>
+                </div>
+                <div class="btn-group">
+                    <button onclick="shiftPattern(-1)" title="Shift Pattern Left">❮</button>
+                    <button onclick="shiftPattern(1)" title="Shift Pattern Right">❯</button>
+                </div>
+                <div class="btn-group">
+                    <button onclick="addChunk()" title="Add Measure (Shift + Right)">+Grid</button>
+                    <button onclick="removeChunk()" title="Remove 32 Columns (Shift + Left)">-Grid</button>
+                    <button onclick="trimGrid()" title="Trim Grid to Last Note">Trim</button>
+                    <button onclick="modifyRows('top', 1)" title="Add Row Top">+▲</button>
+                    <button onclick="modifyRows('top', -1)" title="Remove Row Top">-▲</button>
+                    <button onclick="modifyRows('bottom', 1)" title="Add Row Bottom">+▼</button>
+                    <button onclick="modifyRows('bottom', -1)" title="Remove Row Bottom">-▼</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loop & Snap Section -->
+        <div class="toolbar-section sec-loop" title="Snap Resolution and Loop Settings">
+            <div class="section-body">
+                <div class="control-group">
+                    <label>Meas</label>
+                    <select id="measure-select" onchange="setBeatsPerMeasure(this.value)" style="width:45px" title="Beats per Measure">
+                        <option value="2">2/4</option>
+                        <option value="3">3/4</option>
+                        <option value="4" selected>4/4</option>
+                        <option value="5">5/4</option>
+                        <option value="6">6/4</option>
+                        <option value="7">7/4</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label><input type="checkbox" id="snap-to-grid" onchange="toggleSnapToGrid()" checked
+                            title="Enable Snapping"> Snap</label>
+                    <select id="snap-select" onchange="setSnapResolution(this.value)" style="width:60px"
+                        title="Snap Resolution (6-8)">
+                        <option value="1">16th</option>
+                        <option value="2">8th</option>
+                        <option value="4" selected>1/4</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label><input type="checkbox" id="loop-active" onchange="updateLoop()" title="Enable Loop Region">
+                        Loop</label>
+                    <input type="number" id="loop-start" value="0" min="0" style="width:50px" onchange="updateLoop()"
+                        title="Loop Start">
+                    <input type="number" id="loop-end" value="32" min="1" style="width:50px" onchange="updateLoop()"
+                        title="Loop End">
+                </div>
+            </div>
+        </div>
+
+        <!-- Quiz Section -->
+        <div class="toolbar-section sec-quiz" title="Quiz / Dictation: Practice Ear Training">
+            <div class="section-body">
+                <button id="quiz-save-btn" onclick="openSaveQuizModal()" title="Save Current Grid as Quiz Tune">💾 Save Tune</button>
+                <div class="control-group">
+                    <select id="quiz-tune-select" onchange="loadQuizTune(this.value); this.selectedIndex=0" style="width:100px" title="Load a saved quiz tune">
+                        <option disabled selected>Quiz Tunes</option>
+                    </select>
+                    <button onclick="toggleArchiveManager('quiz')" title="Manage Archived Quiz Tunes">📁</button>
+                </div>
+                <button id="quiz-random-btn" onclick="generateRandomExercise()" title="Generate a random exercise">🎲 Random</button>
+                <button id="quiz-start-btn" onclick="startQuiz()" title="Start Dictation Mode (Target = Current Grid)">🎓 Start</button>
+                <button id="quiz-play-target-btn" onclick="togglePlayTarget()" title="Hear Target Melody" disabled>👂 Target</button>
+                <button id="quiz-check-btn" onclick="checkQuizAnswers()" title="Check My Transcription" disabled>✅ Check</button>
+                <button id="quiz-end-btn" onclick="endQuiz()" title="End Quiz and Restore Grid" disabled>✖ End</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="workspace">
+        <div id="sidebar">
+            <div class="sidebar-controls">
+                <select id="inst-patch-select" onchange="changeInstrumentPatch(this.value)" style="width:100%"
+                    title="Change Instrument Patch">
+                    <!-- Populated by JS -->
+                </select>
+                <div class="row-tight">
+                    <button onclick="toggleRemapOverlay()" style="flex-grow:1"
+                        title="Remap Instruments (Alt + M)">Remap</button>
+                    <label title="Show notes from other instruments"><input type="checkbox" id="ghost-check" checked>
+                        Ghosts</label>
+                </div>
+                <div class="row-tight">
+                    <label title="Global Instrument Override (Alt + G)"><input type="checkbox"
+                            id="global-override-check" onchange="toggleGlobalOverride()"> Global</label>
+                    <select id="global-override-select" onchange="setGlobalOverrideInst(this.value)" disabled
+                        title="Select Global Instrument" style="flex-grow: 1; min-width: 0;">
+                        <!-- Populated by JS -->
+                    </select>
+                </div>
+            </div>
+            <div id="palette"></div>
+        </div>
+        <div id="canvas-holder">
+            <div id="p5-container"></div>
+        </div>
+    </div>
+
+    <div id="help-overlay" onclick="toggleHelp()">
+        <div class="help-content" onclick="event.stopPropagation()">
+            <div class="help-group">
+                <h3>General</h3>
+                <div class="help-item"><span>Play / Pause</span><span class="key">Space</span></div>
+                <div class="help-item"><span>Undo / Redo</span><span class="key">Ctrl + Z / Y</span></div>
+                <div class="help-item"><span>Record</span><span class="key">r</span></div>
+                <div class="help-item"><span>Focus Presets</span><span class="key">f</span></div>
+                <div class="help-item"><span>Toggle Help</span><span class="key">?</span></div>
+                <div class="help-item"><span>Convert Mode</span><span class="key">Alt + C</span></div>
+                <div class="help-item"><span>Accidental Mode</span><span class="key">Alt + A</span></div>
+                <div class="help-item"><span>Select Instrument</span><span class="key">Shift + 1 - =</span></div>
+            </div>
+            <div class="help-group">
+                <h3>Selection & Edit</h3>
+                <div class="help-item"><span>Selection Mode</span><span class="key">s</span></div>
+                <div class="help-item"><span>Copy / Cut / Paste</span><span class="key">Ctrl + C / X / V</span></div>
+                <div class="help-item"><span>Delete Selection</span><span class="key">Del</span></div>
+            </div>
+            <div class="help-group">
+                <h3>Grid & Scale</h3>
+                <div class="help-item"><span>Add Chunk</span><span class="key">Shift + &rarr;</span></div>
+                <div class="help-item"><span>Remove Chunk</span><span class="key">Shift + &larr;</span></div>
+                <div class="help-item"><span>Transpose Root</span><span class="key">&uarr; / &darr;</span></div>
+                <div class="help-item"><span>Cycle Scale</span><span class="key">Shift + &uarr;/&darr;</span></div>
+            </div>
+            <div class="help-group">
+                <h3>Note Duration</h3>
+                <div class="help-item"><span>16th / 8th / 1/4</span><span class="key">1 / 2 / 3</span></div>
+                <div class="help-item"><span>1/2 / Whole</span><span class="key">4 / 5</span></div>
+                <div class="help-item"><span>Snap Res (16..1/4)</span><span class="key">6 / 7 / 8</span></div>
+            </div>
+            <div class="help-group">
+                <h3>Rhythm Patterns</h3>
+                <div class="help-item"><span>Single Note</span><span class="key">Shift + Q</span></div>
+                <div class="help-item"><span>Triplet</span><span class="key">Shift + W</span></div>
+                <div class="help-item"><span>Anapest</span><span class="key">Shift + E</span></div>
+                <div class="help-item"><span>Dactyl</span><span class="key">Shift + R</span></div>
+            </div>
+            <div class="help-group">
+                <h3>Playback Tools</h3>
+                <div class="help-item"><span>Remap Overlay</span><span class="key">Alt + M</span></div>
+                <div class="help-item"><span>Global Override</span><span class="key">Alt + G</span></div>
+            </div>
+            <div class="help-group">
+                <h3>Quiz Mode</h3>
+                <div class="help-item"><span>Start Quiz</span><span>Use current grid as target</span></div>
+                <div class="help-item"><span>Random Exercise</span><span>Generate simple melody</span></div>
+                <div class="help-item"><span>👂 Play Target</span><span>Hear the hidden melody</span></div>
+                <div class="help-item"><span>🎹 Play My Input</span><span>Hear your transcription</span></div>
+                <div class="help-item"><span>✅ Check</span><span>Show correct/missing notes</span></div>
+            </div>
+            <div
+                style="grid-column: 1 / -1; margin-top: 10px; padding-top: 10px; border-top: 1px solid #333; font-size: 11px; color: #666; text-align: center; line-height: 1.5;">
+                <strong>Solfeger Sequencer v1.0</strong> &copy; 2026. Licensed under MIT.<br>
+                Created by <strong>adi</strong> & <strong>Gemini CLI</strong>.<br>
+                Powered by <a href="https://p5js.org/" target="_blank" style="color: #888;">p5.js</a>, <a
+                    href="https://tonejs.github.io/" target="_blank" style="color: #888;">Tone.js</a>, and <a
+                    href="https://github.com/danigb/soundfont-player" target="_blank"
+                    style="color: #888;">soundfont-player</a>.
+            </div>
+        </div>
+    </div>
+
+    <div id="convert-options">
+        <h3>Convert Selection</h3>
+        <button class="convert-btn" style="background: #bd93f9;" onclick="applyConversion('triplet')">Triplet
+            (Purple)</button>
+        <button class="convert-btn" style="background: #ffb86c;" onclick="applyConversion('anapest')">Anapest
+            (Orange)</button>
+        <button class="convert-btn" style="background: #8be9fd;" onclick="applyConversion('dactyl')">Dactyl
+            (Cyan)</button>
+        <button class="convert-btn" style="background: #ccc;" onclick="cancelConversion()">Cancel</button>
+    </div>
+
+    <div id="remap-overlay" onclick="toggleRemapOverlay()">
+        <div class="remap-content" onclick="event.stopPropagation()">
+            <h3 style="margin:0; text-align:center; color:#00f2ff;">Instrument Remap</h3>
+            <div id="remap-list"></div>
+            <div class="row" style="justify-content: space-between; margin-top: 10px;">
+                <button onclick="randomizeMapping()">Randomize</button>
+                <button onclick="resetMapping()">Reset</button>
+                <button onclick="toggleRemapOverlay()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="loading-overlay" style="display:none;">
+        <div class="spinner"></div>
+        <div id="loading-text">Loading...</div>
+    </div>
+
+    <div id="archive-overlay" onclick="toggleArchiveManager()">
+        <div class="archive-content" onclick="event.stopPropagation()">
+            <h3 id="archive-title">Archive Manager</h3>
+            <div id="archive-actions" style="margin-bottom: 15px; display: flex; gap: 10px;">
+                <button onclick="exportQuizTunes()" id="export-quiz-btn">📤 Export All</button>
+                <button onclick="document.getElementById('import-quiz-input').click()" id="import-quiz-btn">📥 Import</button>
+                <input type="file" id="import-quiz-input" style="display:none" onchange="importQuizTunes(event)">
+            </div>
+            <div id="archive-list"></div>
+            <div class="row" style="justify-content: flex-end; margin-top: 10px;">
+                <button onclick="toggleArchiveManager()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="save-quiz-overlay" class="modal-overlay" onclick="closeSaveQuizModal()">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <h3>Save Quiz Tune</h3>
+            <div class="save-new-group" style="display: flex; gap: 10px; margin-bottom: 20px;">
+                <input type="text" id="new-quiz-name" placeholder="Enter new tune name..." style="flex-grow: 1; padding: 8px;">
+                <button onclick="saveNewQuizTune()" class="primary-btn">Save New</button>
+            </div>
+            <div id="existing-quizzes-list" class="scroll-list">
+                <!-- Populated by JS -->
+            </div>
+            <div class="row" style="justify-content: flex-end; margin-top: 15px;">
+                <button onclick="closeSaveQuizModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="message-modal-overlay" class="modal-overlay" onclick="closeMessageModal()">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <h3 id="message-modal-title">Notification</h3>
+            <div id="message-modal-body" style="padding: 10px 0; line-height: 1.5;"></div>
+            <div class="row" style="justify-content: flex-end; margin-top: 15px;">
+                <button id="message-modal-close" onclick="closeMessageModal()" class="primary-btn">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="confirm-modal-overlay" class="modal-overlay">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <h3 id="confirm-modal-title">Are you sure?</h3>
+            <div id="confirm-modal-body" style="padding: 10px 0; line-height: 1.5;"></div>
+            <div class="row" style="justify-content: flex-end; gap: 10px; margin-top: 15px;">
+                <button id="confirm-modal-cancel" class="secondary-btn">Cancel</button>
+                <button id="confirm-modal-ok" class="primary-btn">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="welcome-modal-overlay" class="modal-overlay">
+        <div class="modal-content welcome-content" onclick="event.stopPropagation()">
+            <div class="welcome-header">
+                <span class="welcome-icon">🎵</span>
+                <h2>Welcome to Solfeger</h2>
+            </div>
+            <div class="welcome-body">
+                <p>Your grid-based sequencer and ear-training companion.</p>
+                <div class="welcome-features">
+                    <div class="feature"><span>🎹</span> Paint notes on the grid</div>
+                    <div class="feature"><span>📐</span> Choose scales & rhythms</div>
+                    <div class="feature"><span>🎓</span> Practice ear training</div>
+                </div>
+            </div>
+            <div class="row" style="justify-content: center; margin-top: 25px;">
+                <button id="welcome-close-btn" class="primary-btn" style="padding: 12px 40px; font-size: 1.1em;">Get Started</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module" src="main.js"></script>
+</body>
+
+</html>
