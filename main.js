@@ -8,8 +8,9 @@ import {
     ui, tooltip, initPresets, initPalette, initGMPatches, showLoading, hideLoading, setUICallbacks, updatePlayButtonState, toggleSidebarCollapse, toggleToolbarCollapse, toggleGlobalOverride, setGlobalOverrideInst, toggleRemapOverlay, renderRemapList, randomizeMapping, resetMapping, toggleArchiveManager, openSaveQuizModal, closeSaveQuizModal, renderArchiveList, showWelcomeScreen 
 } from './src/ui.js';
 import { 
-    initAudio, loadInstrument, synths, disposeAllSynths, recorder, getPlaybackId, togglePlay, toggleRecord, updateBPM, masterGain, masterReverb, setLayerVolume 
+    initAudio, loadInstrument, synths, disposeSynth, disposeAllSynths, recorder, getPlaybackId, togglePlay, toggleRecord, stopRecordAndSave, updateBPM, masterGain, masterReverb, setLayerVolume 
 } from './src/audio.js';
+import { exportProjectMP3 } from './src/mp3Export.js';
 import { 
     updateScale, calculateCenteredTopNoteMidi, getNoteAt, updateNoteLookup, getPlaybackNote, isAccidentalRedundant, ensurePatternPitches, addSelectedChordProgression, randomizeGrid, reverseGrid, flipGrid, shiftPattern, findNextScaleNoteMidi 
 } from './src/gridLogic.js';
@@ -104,7 +105,12 @@ const callbacks = {
             reverbWet: ui.reverbSlider ? parseFloat(ui.reverbSlider.value) : 0,
             layers: JSON.parse(JSON.stringify(AppState.layers)),
             nextLayerId: AppState.nextLayerId,
-            settings: JSON.parse(JSON.stringify(AppState.settings))
+            settings: JSON.parse(JSON.stringify(AppState.settings)),
+            selection: (AppState.editor.selectionStart && AppState.editor.selectionEnd) ? {
+                start: { ...AppState.editor.selectionStart },
+                end: { ...AppState.editor.selectionEnd },
+                mode: AppState.editor.selectionMode
+            } : null
         };
 
         if (AppState.history.stack.length > 0) {
@@ -129,7 +135,9 @@ const callbacks = {
     deleteLayer: (id) => deleteLayer(id),
     addLayer: () => addLayer(),
     togglePlay: (fn) => togglePlay(fn),
-    toggleRecord: () => toggleRecord(),
+    toggleRecord: () => toggleRecord(callbacks),
+    stopRecordAndSave: () => stopRecordAndSave(),
+    exportMP3: () => exportProjectMP3(callbacks, synths),
     undo: () => undo(),
     redo: () => redo(),
     restoreState: (s) => restoreState(s),
@@ -222,6 +230,22 @@ async function restoreState(state) {
     AppState.layers = JSON.parse(JSON.stringify(state.layers));
     AppState.nextLayerId = state.nextLayerId || (AppState.layers.reduce((max, l) => Math.max(max, l.id), 0) + 1);
 
+    if (state.selection) {
+        AppState.editor.selectionStart = { ...state.selection.start };
+        AppState.editor.selectionEnd = { ...state.selection.end };
+        if (state.selection.mode !== undefined) {
+            AppState.editor.selectionMode = state.selection.mode;
+            const btn = document.getElementById('select-btn');
+            if (btn) btn.classList.toggle('active', AppState.editor.selectionMode);
+        }
+    } else if (AppState.editor.lastCopiedBounds) {
+        AppState.editor.selectionStart = { r: AppState.editor.lastCopiedBounds.r1, c: AppState.editor.lastCopiedBounds.c1 };
+        AppState.editor.selectionEnd = { r: AppState.editor.lastCopiedBounds.r2, c: AppState.editor.lastCopiedBounds.c2 };
+    } else {
+        AppState.editor.selectionStart = null;
+        AppState.editor.selectionEnd = null;
+    }
+
     updateScale();
     updateNoteLookup();
     callbacks.recalculateLastActiveStep();
@@ -244,9 +268,29 @@ function selectLayer(id) {
 }
 
 function deleteLayer(id) {
+    // 1. Remove notes placed on this layer from the grid
+    for (let r = 0; r < AppState.rows; r++) {
+        for (let c = 0; c < AppState.cols; c++) {
+            if (AppState.grid[r] && AppState.grid[r][c] && AppState.grid[r][c].id === id) {
+                AppState.grid[r][c] = null;
+                if (AppState.accidentals[r]) AppState.accidentals[r][c] = null;
+            }
+        }
+    }
+    updateNoteLookup();
+
+    // 2. Remove layer from AppState
     AppState.layers = AppState.layers.filter(l => l.id !== id);
+
+    // 3. Dispose audio synth for this layer
+    disposeSynth(id);
+
+    // 4. Update selection / palette
     if (AppState.editor.selectedInst === id) selectLayer(AppState.layers[0].id);
     else initPalette();
+
+    // 5. Persist state and history
+    callbacks.saveState();
 }
 
 function addLayer() {
@@ -255,6 +299,7 @@ function addLayer() {
     AppState.layers.push(newLayer);
     loadInstrument(id, newLayer.patch, false, updateInstrumentLabel);
     initPalette();
+    callbacks.saveState();
 }
 
 function updateInstrumentLabel(id, patchName, updateName = true) {
@@ -276,6 +321,8 @@ window.restoreState = restoreState;
 window.newProject = () => newProject(callbacks);
 window.exportJSON = exportJSON;
 window.exportMIDI = () => exportMIDI(isAccidentalRedundant);
+window.exportMP3 = () => exportProjectMP3(callbacks, synths);
+window.toggleRecord = () => toggleRecord(callbacks);
 window.importJSON = (e) => eventHandlers.importJSON(e, callbacks);
 window.importHookpad = (e) => eventHandlers.importHookpad(e, callbacks);
 window.loadPreset = (name) => loadPreset(name, callbacks);
@@ -358,7 +405,7 @@ window.oncontextmenu = (e) => {
 
 
 // --- p5.js Lifecycle Hooks ---
-window.setup = () => {
+window.setup = async () => {
     showWelcomeScreen();
     const canvas = createCanvas((AppState.cols / STEPS_PER_GRID_CELL) * CELL_WIDTH + MARGIN_LEFT, AppState.rows * CELL_HEIGHT + PADDING_BOTTOM + PADDING_TOP);
     canvas.parent('p5-container');
@@ -400,7 +447,7 @@ window.setup = () => {
     document.getElementById('sidebar-toggle').onclick = toggleSidebarCollapse;
     document.getElementById('toolbar-toggle').onclick = toggleToolbarCollapse;
     ui.playBtn.onclick = () => togglePlay(callbacks.findLastActiveStep);
-    ui.recBtn.onclick = toggleRecord;
+    ui.recBtn.onclick = () => toggleRecord(callbacks);
 
     setUICallbacks(callbacks);
     initAudio();
@@ -408,21 +455,47 @@ window.setup = () => {
     initPresets();
     initQuizTunes();
 
-    // Default Project Init
-    initGridState();
-    AppState.layers = [{ id: 1, ...DEFAULT_LAYER }];
-    AppState.topNoteMidi = calculateCenteredTopNoteMidi(DEFAULT_ROOT, DEFAULT_SCALE, DEFAULT_ROWS);
+    // Clipboard Init
+    try {
+        const savedClip = localStorage.getItem('solfeger_clipboard');
+        if (savedClip) AppState.editor.clipboard = JSON.parse(savedClip);
+    } catch (e) {}
 
-    loadInstrument(1, DEFAULT_LAYER.patch, false, updateInstrumentLabel);
-    updateScale();
-    initPalette();
+    // Project Init: restore temporarily saved song from localStorage if available
+    let loadedSaved = false;
+    const savedStateStr = localStorage.getItem('solfeger_state');
+    if (savedStateStr) {
+        try {
+            const savedState = JSON.parse(savedStateStr);
+            if (savedState && (savedState.notes || savedState.grid)) {
+                await restoreState(savedState);
+                AppState.history.stack = [savedState];
+                AppState.history.index = 0;
+                loadedSaved = true;
+            }
+        } catch (e) {
+            console.error("Failed to restore saved song from localStorage:", e);
+        }
+    }
+
+    if (!loadedSaved) {
+        // Default Project Init
+        initGridState();
+        AppState.layers = [{ id: 1, ...DEFAULT_LAYER }];
+        AppState.topNoteMidi = calculateCenteredTopNoteMidi(DEFAULT_ROOT, DEFAULT_SCALE, DEFAULT_ROWS);
+
+        loadInstrument(1, DEFAULT_LAYER.patch, false, updateInstrumentLabel);
+        updateScale();
+        initPalette();
+
+        // Initial UI Setup for audio
+        if (ui.swingSlider) eventHandlers.setSwing(ui.swingSlider.value);
+        if (ui.volumeSlider) eventHandlers.updateMasterVolume(ui.volumeSlider.value);
+        if (ui.reverbSlider) eventHandlers.setMasterReverb(ui.reverbSlider.value);
+        if (ui.measureSelect) AppState.beatsPerMeasure = parseInt(ui.measureSelect.value);
+    }
     updateQuizUI();
 
-    // Initial UI Setup for audio
-    if (ui.swingSlider) eventHandlers.setSwing(ui.swingSlider.value);
-    if (ui.volumeSlider) eventHandlers.updateMasterVolume(ui.volumeSlider.value);
-    if (ui.reverbSlider) eventHandlers.setMasterReverb(ui.reverbSlider.value);
-    if (ui.measureSelect) AppState.beatsPerMeasure = parseInt(ui.measureSelect.value);
     Tone.Transport.scheduleRepeat((time) => {
         let next = AppState.playback.currentStep + 1;
         let loopStart = 0;
@@ -433,6 +506,15 @@ window.setup = () => {
             loopEnd = AppState.playback.loopEnd;
         } else if (AppState.playback.isSmartLooping) {
             loopEnd = AppState.playback.smartLoopEnd;
+        }
+
+        if (AppState.playback.isRecording && next >= loopEnd) {
+            setTimeout(async () => {
+                if (AppState.playback.isRecording) {
+                    await stopRecordAndSave();
+                }
+            }, 600);
+            return;
         }
 
         if (next >= loopEnd) next = loopStart;

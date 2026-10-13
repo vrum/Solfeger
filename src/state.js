@@ -106,7 +106,8 @@ export const AppState = {
         smartLoopEnd: 0,
         lastActiveStep: 0,
         userLastStep: 0,
-        targetLastStep: 0
+        targetLastStep: 0,
+        isRecording: false
     },
 
     editor: {

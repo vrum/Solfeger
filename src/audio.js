@@ -1,5 +1,6 @@
 import { AppState, USE_LOCAL_SOUNDFONTS } from './state.js';
 import { ui, updatePlayButtonState } from './ui.js';
+import { audioBufferToMp3, blobToAudioBuffer, downloadBlob } from './mp3Export.js';
 
 export let synths = {};
 export let recorder = new Tone.Recorder();
@@ -23,6 +24,13 @@ export function setLayerVolume(id, volume) {
 export function getPlaybackId(id) {
     if (AppState.settings.globalOverrideActive) return parseInt(AppState.settings.globalOverrideInst);
     return AppState.settings.instrumentMapping[id] || id;
+}
+
+export function disposeSynth(id) {
+    if (synths[id] && typeof synths[id].dispose === 'function') {
+        synths[id].dispose();
+    }
+    delete synths[id];
 }
 
 export function disposeAllSynths() {
@@ -77,6 +85,7 @@ export async function loadInstrument(id, patchName, updateName = true, onComplet
 
         const player = await Soundfont.instrument(Tone.context.rawContext, patchName, options);
         synths[id] = {
+            player: player,
             gainNode: gainNode,
             triggerAttackRelease: (note, duration, time) => {
                 if (Array.isArray(note)) note.forEach(n => player.play(n, time, { duration: Tone.Time(duration).toSeconds() }));
@@ -116,22 +125,74 @@ export async function togglePlay(findLastActiveStep) {
         AppState.playback.isSmartLooping = false;
         AppState.playback.smartLoopEnd = 0;
         ui.playBtn.innerText = "▶ Play";
+        if (AppState.playback.isRecording) {
+            await stopRecordAndSave();
+        }
     }
 }
 
-export async function toggleRecord() {
+export async function toggleRecord(callbacks) {
     if (recorder.state === "stopped") {
+        await Tone.start();
+        AppState.playback.isRecording = true;
         recorder.start(); 
-        ui.recBtn.innerText = "Stop Rec"; 
-        ui.recBtn.classList.add('recording');
+        if (ui.recBtn) {
+            ui.recBtn.innerText = "⏹ Stop Rec"; 
+            ui.recBtn.classList.add('recording');
+        }
+
+        // Start playback from beginning
+        if (Tone.Transport.state !== 'started') {
+            const findLast = (callbacks && callbacks.findLastActiveStep) ? callbacks.findLastActiveStep : (() => AppState.cols);
+            if (!ui.loopActive || !ui.loopActive.checked) {
+                const lastStep = findLast();
+                let loopEnd = 32;
+                if (lastStep > 0) loopEnd = Math.ceil(lastStep / 16) * 16;
+                AppState.playback.isSmartLooping = true;
+                AppState.playback.smartLoopEnd = loopEnd;
+            }
+            AppState.playback.currentStep = -1;
+            Tone.Transport.start();
+            if (ui.playBtn) ui.playBtn.innerText = "⏸ Pause";
+        }
     } else {
-        const recording = await recorder.stop();
-        const a = document.createElement("a"); 
-        a.download = "track.webm"; 
-        a.href = URL.createObjectURL(recording); 
-        a.click();
+        await stopRecordAndSave();
+    }
+}
+
+export async function stopRecordAndSave() {
+    if (recorder.state === "stopped" && !AppState.playback.isRecording) return;
+    AppState.playback.isRecording = false;
+
+    if (Tone.Transport.state === 'started') {
+        Tone.Transport.stop();
+        AppState.playback.currentStep = -1;
+        AppState.playback.isSmartLooping = false;
+        AppState.playback.smartLoopEnd = 0;
+        if (ui.playBtn) ui.playBtn.innerText = "▶ Play";
+    }
+
+    if (ui.recBtn) {
         ui.recBtn.innerText = "⏺ Record"; 
         ui.recBtn.classList.remove('recording');
+    }
+
+    if (recorder.state !== "stopped") {
+        let recordingBlob;
+        try {
+            recordingBlob = await recorder.stop();
+            const audioBuffer = await blobToAudioBuffer(recordingBlob);
+            const mp3Blob = audioBufferToMp3(audioBuffer);
+            const tuneName = (ui.presetSelect && ui.presetSelect.value && ui.presetSelect.selectedIndex > 0)
+                ? ui.presetSelect.value.replace(/[^a-zA-Z0-9_-]/g, '_')
+                : 'solfeger-recording';
+            downloadBlob(mp3Blob, `${tuneName}.mp3`);
+        } catch (e) {
+            console.error("Failed to encode recorded audio to MP3:", e);
+            if (recordingBlob) {
+                downloadBlob(recordingBlob, 'track.webm');
+            }
+        }
     }
 }
 

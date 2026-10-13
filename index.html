@@ -12,6 +12,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.37/Tone.js"></script>
     <script src="https://unpkg.com/@tonejs/midi"></script>
     <script src="https://unpkg.com/soundfont-player@0.12.0/dist/soundfont-player.min.js"></script>
+    <script src="src/lame.min.js"></script>
     <link rel="stylesheet" href="src/style.css">
     </head>
 <body>
@@ -30,6 +31,7 @@
                     <button id="save-preset-btn" onclick="saveAsPreset()" title="Save Current as Local Preset">💾</button>
                     <button onclick="exportJSON()" title="Export Project to JSON">📤</button>
                     <button onclick="exportMIDI()" title="Export as MIDI">🎹</button>
+                    <button onclick="exportMP3()" title="Export as MP3">🎵</button>
                     <button id="import-json-btn" onclick="document.getElementById('import-input').click()"
                         title="Import Project from JSON">📂</button>
                     <button id="import-hookpad-btn" onclick="document.getElementById('import-hookpad-input').click()"
@@ -59,7 +61,7 @@
         <div class="toolbar-section sec-transport" title="Playback Controls: Play, Record, Tempo, and Volume">
             <div class="section-body">
                 <button id="play-btn" title="Play/Pause (Space)">▶ Play</button>
-                <button id="rec-btn" title="Record Output (Shift + R)">⏺ Record</button>
+                <button id="rec-btn" title="Record to MP3 (Shift + R)">⏺ Record</button>
                 <div class="control-group">
                     <label>BPM</label>
                     <input type="number" id="bpm-input" min="1" max="999" value="120" style="width:50px" onchange="updateBPM(this.value)" title="Set Tempo">

@@ -257,12 +257,12 @@ export function handleKeyPressed(e, p5, callbacks) {
 
     if (p5.key === ' ') { e.preventDefault(); togglePlay(findLastActiveStep); }
     if (p5.key === 'r' && !p5.keyIsDown(p5.SHIFT) && !p5.keyIsDown(p5.CONTROL) && !p5.keyIsDown(p5.ALT)) toggleRecord();
-    if (p5.key === 'z' && p5.keyIsDown(p5.CONTROL)) undo();
-    if (p5.key === 'y' && p5.keyIsDown(p5.CONTROL)) redo();
-    if (p5.key === 'c' && p5.keyIsDown(p5.CONTROL)) copySelection(p5);
-    if (p5.key === 'x' && p5.keyIsDown(p5.CONTROL)) cutSelection(p5, callbacks);
-    if (p5.key === 'v' && p5.keyIsDown(p5.CONTROL)) pasteSelection(p5, callbacks);
-    if (p5.key === 'Delete' || p5.key === 'Backspace') deleteSelection(p5, callbacks);
+    if (p5.key === 'z' && p5.keyIsDown(p5.CONTROL)) { e?.preventDefault(); undo(); }
+    if (p5.key === 'y' && p5.keyIsDown(p5.CONTROL)) { e?.preventDefault(); redo(); }
+    if (p5.key === 'c' && p5.keyIsDown(p5.CONTROL)) { e?.preventDefault(); copySelection(p5); }
+    if (p5.key === 'x' && p5.keyIsDown(p5.CONTROL)) { e?.preventDefault(); cutSelection(p5, callbacks); }
+    if (p5.key === 'v' && p5.keyIsDown(p5.CONTROL)) { e?.preventDefault(); pasteSelection(p5, callbacks); }
+    if (p5.key === 'Delete' || p5.key === 'Backspace') { e?.preventDefault(); deleteSelection(p5, callbacks); }
     
     if (p5.keyCode === p5.UP_ARROW) { e.preventDefault(); p5.keyIsDown(p5.SHIFT) ? cycleScale(1) : transpose(1); }
     if (p5.keyCode === p5.DOWN_ARROW) { e.preventDefault(); p5.keyIsDown(p5.SHIFT) ? cycleScale(-1) : transpose(-1); }
@@ -329,6 +329,20 @@ export function copySelection(p5) {
             });
         }
     }
+    AppState.editor.lastCopiedBounds = { ...b };
+    if (AppState.history && AppState.history.stack && AppState.history.stack.length > 0 && AppState.history.index >= 0) {
+        const currentHist = AppState.history.stack[AppState.history.index];
+        if (currentHist) {
+            currentHist.selection = {
+                start: { r: b.r1, c: b.c1 },
+                end: { r: b.r2, c: b.c2 },
+                mode: AppState.editor.selectionMode
+            };
+        }
+    }
+    try {
+        localStorage.setItem('solfeger_clipboard', JSON.stringify(AppState.editor.clipboard));
+    } catch (err) {}
 }
 
 export function cutSelection(p5, callbacks) {
@@ -337,20 +351,37 @@ export function cutSelection(p5, callbacks) {
 }
 
 export function pasteSelection(p5, callbacks) {
-    if (!AppState.editor.clipboard) return;
+    if (!AppState.editor.clipboard || AppState.editor.clipboard.length === 0) {
+        try {
+            const savedClip = localStorage.getItem('solfeger_clipboard');
+            if (savedClip) AppState.editor.clipboard = JSON.parse(savedClip);
+        } catch (err) {}
+    }
+    if (!AppState.editor.clipboard || AppState.editor.clipboard.length === 0) return;
     const { saveState } = callbacks;
 
     let originR, originC;
     let c = p5.floor((p5.mouseX - MARGIN_LEFT) / (CELL_WIDTH / STEPS_PER_GRID_CELL));
     let r = p5.floor((p5.mouseY - PADDING_TOP) / CELL_HEIGHT);
 
+    if (AppState.editor.snapToGrid) {
+        c = Math.floor(c / AppState.editor.snapResolution) * AppState.editor.snapResolution;
+    }
+
     if (c >= 0 && c < AppState.cols && r >= 0 && r < AppState.rows) {
         originR = r; originC = c;
     } else if (AppState.editor.selectionStart) {
         originR = AppState.editor.selectionStart.r; originC = AppState.editor.selectionStart.c;
+        if (AppState.editor.snapToGrid) {
+            originC = Math.floor(originC / AppState.editor.snapResolution) * AppState.editor.snapResolution;
+        }
     } else return;
 
+    let maxROffset = 0;
+    let maxCOffset = 0;
     for (let item of AppState.editor.clipboard) {
+        if (item.rOffset > maxROffset) maxROffset = item.rOffset;
+        if (item.cOffset > maxCOffset) maxCOffset = item.cOffset;
         let targetR = originR + item.rOffset;
         let targetC = originC + item.cOffset;
         if (targetR >= 0 && targetR < AppState.rows && targetC >= 0 && targetC < AppState.cols) {
@@ -358,6 +389,14 @@ export function pasteSelection(p5, callbacks) {
             AppState.accidentals[targetR][targetC] = item.accidental;
         }
     }
+
+    AppState.editor.selectionStart = { r: originR, c: originC };
+    AppState.editor.selectionEnd = {
+        r: Math.min(AppState.rows - 1, originR + maxROffset),
+        c: Math.min(AppState.cols - 1, originC + maxCOffset)
+    };
+
+    updateNoteLookup();
     saveState();
 }
 

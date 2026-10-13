@@ -13,3 +13,10 @@ Because of browser security (CORS), you cannot simply double-click `index.html`.
 - If you have Python: `python3 -m http.server 8000`
 
 Then open `http://localhost:8000` in your browser.
+
+## Acknowledgments
+Solfeger is built with the help of wonderful open-source libraries:
+- [Tone.js](https://tonejs.github.io/) - Web Audio framework for synthesis and scheduling.
+- [p5.js](https://p5js.org/) - Creative coding and interactive visual canvas.
+- [soundfont-player](https://github.com/danigb/soundfont-player) - Realistic Soundfont instrument synthesis.
+- [lamejs](https://github.com/gyumei/lamejs) - Pure JavaScript MP3 encoding in the browser.
